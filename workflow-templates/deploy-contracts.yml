@@ -1,0 +1,66 @@
+name: Deploy — Contracts to VNKR Network
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'src/**/*.sol'
+      - 'script/**'
+  workflow_dispatch:
+    inputs:
+      network:
+        description: Target network
+        required: true
+        default: vnkr
+        type: choice
+        options: [vnkr, vnkr-testnet]
+      broadcast:
+        description: Broadcast transaction
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    name: Deploy Contracts
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.network || 'vnkr' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Compile contracts
+        run: forge build --sizes
+
+      - name: Run tests before deploy
+        run: forge test -vvv
+        env:
+          VNKR_RPC_URL: ${{ secrets.VNKR_RPC_URL }}
+
+      - name: Deploy to VNKR Network
+        if: ${{ inputs.broadcast == 'true' || github.ref == 'refs/heads/main' }}
+        run: |
+          forge script script/Deploy.s.sol \
+            --rpc-url ${{ secrets.VNKR_RPC_URL }} \
+            --private-key ${{ secrets.DEPLOYER_KEY }} \
+            --broadcast \
+            --verify \
+            --verifier blockscout \
+            --verifier-url ${{ vars.VNKR_EXPLORER_URL }}/api \
+            -vvvv
+        env:
+          VNKR_RPC_URL: ${{ secrets.VNKR_RPC_URL }}
+          DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
+          MULTISIG: ${{ secrets.MULTISIG_ADDRESS }}
+          CHAIN_ID: ${{ vars.CHAIN_ID }}
