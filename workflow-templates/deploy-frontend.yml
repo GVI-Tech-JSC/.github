@@ -1,0 +1,80 @@
+name: Build & Deploy — Frontend to vnkr.vn
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'vite.config.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deploy environment
+        required: true
+        default: production
+        type: choice
+        options: [production, staging]
+
+env:
+  NODE_VERSION: ${{ vars.NODE_VERSION || '20' }}
+  PNPM_VERSION: ${{ vars.PNPM_VERSION || '9.0.0' }}
+
+jobs:
+  build:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          VITE_CHAIN_ID: ${{ vars.CHAIN_ID }}
+          VITE_RPC_URL: ${{ vars.VNKR_RPC_URL }}
+          VITE_EXPLORER_URL: ${{ vars.VNKR_EXPLORER_URL }}
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ secrets.WALLETCONNECT_PROJECT_ID }}
+          VITE_GOLDSKY_PROJECT_ID: ${{ secrets.GOLDSKY_PROJECT_ID }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Server
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'production' }}
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+
+      - name: Deploy via rsync over SSH
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avzr --delete
+          path: dist/
+          remote_path: /var/www/app.vnkr.vn/
+          remote_host: ${{ secrets.DEPLOY_HOST }}
+          remote_user: deploy
+          remote_key: ${{ secrets.DEPLOY_SSH_KEY }}
